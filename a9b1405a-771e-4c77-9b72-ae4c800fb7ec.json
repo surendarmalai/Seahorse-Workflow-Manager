@@ -1,0 +1,579 @@
+{
+  "workflow": {
+    "nodes": [{
+      "id": "6738200b-4899-3aab-c1bf-0cb4eceaf562",
+      "operation": {
+        "id": "c57a5b99-9184-4095-9037-9359f905628d",
+        "name": "Assemble Vector"
+      },
+      "parameters": {
+        "input columns": {
+          "selections": [{
+            "type": "columnList",
+            "values": ["Exited"]
+          }],
+          "excluding": true
+        },
+        "output column": "features"
+      }
+    }, {
+      "id": "a4042991-fcff-33d6-311d-ad784f60bf96",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "import pandas as pd\ndef transform(dataframe):\n    df = dataframe.toPandas()\n    df = pd.get_dummies(df, columns=[\"Geography\", \"Gender\"], drop_first=True)\n    return df"
+      }
+    }, {
+      "id": "b505214f-c056-a796-59e2-3f07ec24c1f4",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "from pyspark.ml.linalg import VectorUDT\r\nimport pandas as pd\r\n\r\ndef transform(dataframe):\r\n    df = dataframe.toPandas()\r\n    df['features'] = df['features'].apply(lambda x: x.toArray() if hasattr(x, 'toArray') else x)\r\n\r\n    # Assign back to original columns\r\n    df['CreditScore'] = df['features'].apply(lambda x: x[0])\r\n    df['Age'] = df['features'].apply(lambda x: x[1])\r\n    df['Tenure'] = df['features'].apply(lambda x: x[2])\r\n    df['Balance'] = df['features'].apply(lambda x: x[3])\r\n    df['NumOfProducts'] = df['features'].apply(lambda x: x[4])\r\n    df['HasCrCard'] = df['features'].apply(lambda x: x[5])\r\n    df['IsActiveMember'] = df['features'].apply(lambda x: x[6])\r\n    df['EstimatedSalary'] = df['features'].apply(lambda x: x[7])\r\n    df['Geography_Germany'] = df['features'].apply(lambda x: x[8])\r\n    df['Geography_Spain'] = df['features'].apply(lambda x: x[9])\r\n    df['Gender_Male'] = df['features'].apply(lambda x: x[10])\r\n\r\n    df.drop(columns=['features'], inplace=True)\r\n\r\n    return df\r\n"
+      }
+    }, {
+      "id": "deea25dd-8aac-b750-c6ea-27aafc7effbd",
+      "operation": {
+        "id": "a63b6de3-793b-4cbd-ae81-76de216d90d5",
+        "name": "Min-Max Scaler"
+      },
+      "parameters": {
+        "input column": {
+          "type": "column",
+          "value": "features"
+        }
+      }
+    }, {
+      "id": "52c2df24-1c83-ad70-9ea9-303c47688bec",
+      "operation": {
+        "id": "6534f3f4-fa3a-49d9-b911-c213d3da8b5d",
+        "name": "Filter Columns"
+      },
+      "parameters": {
+        "selected columns": {
+          "selections": [{
+            "type": "columnList",
+            "values": ["RowNumber", "CustomerId", "Surname"]
+          }],
+          "excluding": true
+        }
+      }
+    }, {
+      "id": "b619d80c-6c1c-7025-d778-2bad73c7605b",
+      "operation": {
+        "id": "e76ca616-0322-47a5-b390-70c9668265dd",
+        "name": "Python Notebook"
+      },
+      "parameters": {
+
+      }
+    }, {
+      "id": "e98c50a3-9692-b6c7-23c8-b617f9dc0347",
+      "operation": {
+        "id": "04084863-fdda-46fd-b1fe-796c6b5a0967",
+        "name": "Convert Type"
+      },
+      "parameters": {
+        "target type": {
+          "int": {
+
+          }
+        },
+        "operate on": {
+          "multiple columns": {
+            "input columns": {
+              "selections": [{
+                "type": "typeList",
+                "values": ["string"]
+              }],
+              "excluding": false
+            }
+          }
+        }
+      }
+    }, {
+      "id": "2113624e-c5b5-2096-2045-243a11dbee74",
+      "operation": {
+        "id": "e76ca616-0322-47a5-b390-70c9668265dd",
+        "name": "Python Notebook"
+      },
+      "parameters": {
+
+      }
+    }, {
+      "id": "904f4396-8aee-eab3-0d48-752532f69a9c",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "import pickle\r\nimport mlflow\r\nimport pandas as pd\r\nimport numpy as np\r\nfrom sklearn.metrics import (\r\n    roc_auc_score, accuracy_score, precision_score, recall_score, \r\n    f1_score, log_loss, confusion_matrix\r\n)\r\n\r\nexperiment_name = spark.conf.get(\"spark.mlflow.experimentName\")\r\n\r\ndef calc_pct_proba(y_pred_proba, classes, y_true, y_pred):\r\n    df_tmp = pd.DataFrame(y_pred_proba, columns=classes)\r\n    pct_proba = pd.DataFrame(\r\n        columns=['churn_percentile', 'population_by_percentile', \r\n                 'predicted_to_churn', 'min_proba', 'max_proba', \r\n                 'f1', 'accuracy', 'precision', 'recall']\r\n    )\r\n    df_tmp['pct'] = df_tmp[1].rank(pct=True) * 100\r\n    df_tmp['y_true'] = y_true.values\r\n    df_tmp['y_pred'] = y_pred\r\n    for i in range(96, -1, -4):\r\n        tmp_df = df_tmp[df_tmp['pct'] > i]\r\n        population = len(tmp_df)\r\n        pred_churn = len(tmp_df[tmp_df['y_pred'] == 1])\r\n        min_proba = tmp_df[1].min()\r\n        max_proba = tmp_df[1].max()\r\n        accuracy = accuracy_score(tmp_df['y_true'], tmp_df['y_pred'])\r\n        precision = precision_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n        recall = recall_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n        f1 = f1_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n\r\n        pct_proba.loc[len(pct_proba)] = (\r\n            i, population, pred_churn, min_proba, max_proba, f1, accuracy, precision, recall\r\n        )\r\n    return pct_proba\r\n    \r\ndef get_run_id(run_id_path):\r\n    with open(run_id_path, \"r\") as f:\r\n        run_id = f.read().strip()\r\n    return run_id\r\n\r\ndef transform(dataframe):\r\n\r\n    run_id = get_run_id(f'/library/{experiment_name}')\r\n    \r\n    df = dataframe.toPandas()\r\n    X_test = df.drop(columns=[\"Exited\"])\r\n    y_test = df[\"Exited\"]\r\n\r\n    with mlflow.start_run(run_id = run_id):\r\n        \r\n        lr = mlflow.sklearn.load_model(f\"runs:/{run_id}/model\")\r\n        y_pred = lr.predict(X_test)\r\n        y_pred_proba = lr.predict_proba(X_test)\r\n        \r\n        mlflow.log_metric(\"roc_auc\", np.float64(roc_auc_score(y_test, y_pred)))\r\n        mlflow.log_metric(\"accuracy\", np.float64(accuracy_score(y_test, y_pred)))\r\n        mlflow.log_metric(\"precision\", np.float64(precision_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"recall\", np.float64(recall_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"f1_score\", np.float64(f1_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"log_loss\", np.float64(log_loss(y_test, y_pred_proba)))\r\n        \r\n        conf_matrix = pd.DataFrame(confusion_matrix(y_test, y_pred))\r\n        conf_matrix.to_csv(\"confusion_matrix_logged.csv\", index=False)\r\n        mlflow.log_artifact(\"confusion_matrix_logged.csv\")\r\n        \r\n        proba_df = calc_pct_proba(y_pred_proba, lr.classes_, y_test, y_pred)\r\n        proba_df.to_csv(\"proba_df_logged.csv\", index=False)\r\n        mlflow.log_artifact(\"proba_df_logged.csv\")\r\n        \r\n        example_input = X_test.head(5)\r\n        example_input.to_csv(\"example_input.csv\", index=False)\r\n        mlflow.log_artifact(\"example_input.csv\")\r\n        \r\n        feature_names = list(X_test.columns)\r\n        with open(\"feature_names.txt\", \"w\") as f:\r\n            f.write(\"\\n\".join(feature_names))\r\n        mlflow.log_artifact(\"feature_names.txt\")\r\n\r\n    mlflow.end_run()\r\n    return dataframe"
+      }
+    }, {
+      "id": "baeb7490-f282-fb49-38cb-85962a24644c",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "from pyspark.ml.linalg import VectorUDT\r\nimport pandas as pd\r\n\r\ndef transform(dataframe):\r\n    # Convert Spark DataFrame to pandas\r\n    df = dataframe.toPandas()\r\n\r\n    # If features column is a vector, convert to list\r\n    df['features'] = df['features'].apply(lambda x: x.toArray() if hasattr(x, 'toArray') else x)\r\n\r\n    # Assign back to original columns\r\n    df['CreditScore'] = df['features'].apply(lambda x: x[0])\r\n    df['Age'] = df['features'].apply(lambda x: x[1])\r\n    df['Tenure'] = df['features'].apply(lambda x: x[2])\r\n    df['Balance'] = df['features'].apply(lambda x: x[3])\r\n    df['NumOfProducts'] = df['features'].apply(lambda x: x[4])\r\n    df['HasCrCard'] = df['features'].apply(lambda x: x[5])\r\n    df['IsActiveMember'] = df['features'].apply(lambda x: x[6])\r\n    df['EstimatedSalary'] = df['features'].apply(lambda x: x[7])\r\n    df['Geography_Germany'] = df['features'].apply(lambda x: x[8])\r\n    df['Geography_Spain'] = df['features'].apply(lambda x: x[9])\r\n    df['Gender_Male'] = df['features'].apply(lambda x: x[10])\r\n\r\n    # Optionally drop the features column if you no longer need it\r\n    df.drop(columns=['features'], inplace=True)\r\n\r\n    return df  # returns pandas dataframe with original columns restored\r\n"
+      }
+    }, {
+      "id": "994b47ed-de31-9cf1-ca31-d6f3817a86b7",
+      "operation": {
+        "id": "1a3b32f0-f56d-4c44-a396-29d2dfd43423",
+        "name": "Read DataFrame"
+      },
+      "parameters": {
+        "data source": "9bc247cf-50d3-ab01-6fd3-b6e37e5b91ea"
+      }
+    }, {
+      "id": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
+      "operation": {
+        "id": "d273c42f-b840-4402-ba6b-18282cc68de3",
+        "name": "Split"
+      },
+      "parameters": {
+        "split mode": {
+          "RANDOM": {
+            "split ratio": 0.2
+          }
+        }
+      }
+    }, {
+      "id": "affb6f6a-6257-83c7-f29f-773fe04bdbf2",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "import mlflow\r\nfrom sklearn.linear_model import LogisticRegression\r\nimport os\r\n\r\nexperiment_name = spark.conf.get(\"spark.mlflow.experimentName\")\r\nmlflow.set_experiment(experiment_name)\r\nmlflow.sklearn.autolog()\r\n\r\ndef write_run_id(path, run_id):\r\n    with open(path, \"w\") as f:\r\n        f.write(run_id)\r\n\r\ndef transform(dataframe):\r\n    with mlflow.start_run() as run:\r\n        df = dataframe.toPandas()\r\n        X = df.drop(columns=[\"Exited\"])\r\n        y = df[\"Exited\"]\r\n        run_id = run.info.run_id\r\n        \r\n        lr = LogisticRegression()\r\n        lr.fit(X, y)\r\n\r\n        write_run_id(f'/library/{experiment_name}', run_id)\r\n        return dataframe\r\n"
+      }
+    }, {
+      "id": "193f247e-dd3e-c407-79c2-f56440133ea3",
+      "operation": {
+        "id": "643d8706-24db-4674-b5b4-10b5129251fc",
+        "name": "Transform"
+      },
+      "parameters": {
+        "Parameters of input Transformer": {
+
+        }
+      }
+    }],
+    "connections": [{
+      "from": {
+        "nodeId": "994b47ed-de31-9cf1-ca31-d6f3817a86b7",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "52c2df24-1c83-ad70-9ea9-303c47688bec",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "6738200b-4899-3aab-c1bf-0cb4eceaf562",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "deea25dd-8aac-b750-c6ea-27aafc7effbd",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "b505214f-c056-a796-59e2-3f07ec24c1f4",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "52c2df24-1c83-ad70-9ea9-303c47688bec",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "a4042991-fcff-33d6-311d-ad784f60bf96",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "deea25dd-8aac-b750-c6ea-27aafc7effbd",
+        "portIndex": 1
+      },
+      "to": {
+        "nodeId": "193f247e-dd3e-c407-79c2-f56440133ea3",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "193f247e-dd3e-c407-79c2-f56440133ea3",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "baeb7490-f282-fb49-38cb-85962a24644c",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "a4042991-fcff-33d6-311d-ad784f60bf96",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "e98c50a3-9692-b6c7-23c8-b617f9dc0347",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "affb6f6a-6257-83c7-f29f-773fe04bdbf2",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "2113624e-c5b5-2096-2045-243a11dbee74",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "193f247e-dd3e-c407-79c2-f56440133ea3",
+        "portIndex": 1
+      }
+    }, {
+      "from": {
+        "nodeId": "baeb7490-f282-fb49-38cb-85962a24644c",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "b619d80c-6c1c-7025-d778-2bad73c7605b",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "e98c50a3-9692-b6c7-23c8-b617f9dc0347",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "6738200b-4899-3aab-c1bf-0cb4eceaf562",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "b505214f-c056-a796-59e2-3f07ec24c1f4",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "affb6f6a-6257-83c7-f29f-773fe04bdbf2",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "baeb7490-f282-fb49-38cb-85962a24644c",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "904f4396-8aee-eab3-0d48-752532f69a9c",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
+        "portIndex": 1
+      },
+      "to": {
+        "nodeId": "deea25dd-8aac-b750-c6ea-27aafc7effbd",
+        "portIndex": 0
+      }
+    }]
+  },
+  "thirdPartyData": {
+    "gui": {
+      "name": "MLflow",
+      "description": "Testing if MLflow is implementable and usable",
+      "nodes": {
+        "994b47ed-de31-9cf1-ca31-d6f3817a86b7": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8512,
+            "y": 9060
+          }
+        },
+        "193f247e-dd3e-c407-79c2-f56440133ea3": {
+          "uiName": "Test scale",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8594,
+            "y": 9604
+          }
+        },
+        "6738200b-4899-3aab-c1bf-0cb4eceaf562": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8450,
+            "y": 9402
+          }
+        },
+        "904f4396-8aee-eab3-0d48-752532f69a9c": {
+          "uiName": "Testing the model",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8452,
+            "y": 9778
+          }
+        },
+        "b619d80c-6c1c-7025-d778-2bad73c7605b": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8094,
+            "y": 9787
+          }
+        },
+        "52c2df24-1c83-ad70-9ea9-303c47688bec": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8751,
+            "y": 9149
+          }
+        },
+        "c8bca42a-354e-53e8-baf9-6df95c65bfdd": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8744,
+            "y": 9458
+          }
+        },
+        "a4042991-fcff-33d6-311d-ad784f60bf96": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8492,
+            "y": 9222
+          }
+        },
+        "deea25dd-8aac-b750-c6ea-27aafc7effbd": {
+          "uiName": "Train scale",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8950,
+            "y": 9554
+          }
+        },
+        "2113624e-c5b5-2096-2045-243a11dbee74": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8753,
+            "y": 9860
+          }
+        },
+        "b505214f-c056-a796-59e2-3f07ec24c1f4": {
+          "uiName": "Extracting Scaled Features - Train",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 9074,
+            "y": 9667
+          }
+        },
+        "e98c50a3-9692-b6c7-23c8-b617f9dc0347": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8777,
+            "y": 9316
+          }
+        },
+        "affb6f6a-6257-83c7-f29f-773fe04bdbf2": {
+          "uiName": "Training the model",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8948,
+            "y": 9765
+          }
+        },
+        "baeb7490-f282-fb49-38cb-85962a24644c": {
+          "uiName": "Extracting Scaled Features - Test",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 8283,
+            "y": 9660
+          }
+        }
+      }
+    },
+    "notebooks": {
+      "b619d80c-6c1c-7025-d778-2bad73c7605b": {
+        "cells": [{
+          "source": ["import mlflow.pyfunc\n", "import pandas as pd\n", "import numpy as np\n", "from sklearn.metrics import (roc_auc_score, accuracy_score, precision_score, recall_score, f1_score, log_loss)\n", "import mlflow\n", "import os\n", "import json\n"],
+          "execution_count": 1,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": true
+          }
+        }, {
+          "source": ["def calc_pct_proba(y_pred_proba, classes, y_true, y_pred):\n", "    df_tmp = pd.DataFrame(y_pred_proba, columns=classes)\n", "    pct_proba = pd.DataFrame(\n", "        columns=['churn_percentile', 'population_by_percentile', \n", "                 'predicted_to_churn', 'min_proba', 'max_proba', \n", "                 'f1', 'accuracy', 'precision', 'recall']\n", "    )\n", "    df_tmp['pct'] = df_tmp[1].rank(pct=True) * 100\n", "    df_tmp['y_true'] = y_true.values\n", "    df_tmp['y_pred'] = y_pred\n", "    for i in range(96, -1, -4):\n", "        tmp_df = df_tmp[df_tmp['pct'] > i]\n", "        population = len(tmp_df)\n", "        pred_churn = len(tmp_df[tmp_df['y_pred'] == 1])\n", "        min_proba = tmp_df[1].min()\n", "        max_proba = tmp_df[1].max()\n", "        accuracy = accuracy_score(tmp_df['y_true'], tmp_df['y_pred'])\n", "        precision = precision_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\n", "        recall = recall_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\n", "        f1 = f1_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\n", "\n", "        pct_proba.loc[len(pct_proba)] = (\n", "            i, population, pred_churn, min_proba, max_proba, f1, accuracy, precision, recall\n", "        )\n", "    return pct_proba"],
+          "execution_count": null,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": true
+          }
+        }, {
+          "source": ["df = dataframe().toPandas()\n", "X_test = df.drop(columns=[\"Exited\"])\n", "y_test = df[\"Exited\"]\n", "\n", "model_name = \"x-company-churn\" # Regsitery model name\n", "lr = mlflow.sklearn.load_model(f\"models:/{model_name}/latest\")\n", "y_pred = lr.predict(X_test)\n", "y_pred_proba = lr.predict_proba(X_test)\n", "\n", "metrics = {\n", "    \"roc_auc\": roc_auc_score(y_test, y_pred_proba[:,1]),\n", "    \"accuracy\": accuracy_score(y_test, y_pred),\n", "    \"precision\": precision_score(y_test, y_pred, zero_division=0),\n", "    \"recall\": recall_score(y_test, y_pred, zero_division=0),\n", "    \"f1_score\": f1_score(y_test, y_pred, zero_division=0),\n", "    \"log_loss\": log_loss(y_test, y_pred_proba)\n", "}\n", "\n", "proba_df = calc_pct_proba(y_pred_proba, lr.classes_, y_test, y_pred)"],
+          "execution_count": 3,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["print(metrics)"],
+          "execution_count": 4,
+          "outputs": [{
+            "name": "stdout",
+            "output_type": "stream",
+            "text": ["{'roc_auc': 0.7754827142763275, 'accuracy': 0.8180909545227386, 'precision': 0.6223776223776224, 'recall': 0.22305764411027568, 'f1_score': 0.32841328413284127, 'log_loss': 0.4187964942394829}\n"]
+          }],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["proba_df"],
+          "execution_count": null,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }],
+        "metadata": {
+          "kernelspec": {
+            "display_name": "PySpark",
+            "language": "python",
+            "name": "forwarding_kernel_py"
+          },
+          "language_info": {
+            "mimetype": "text/x-python",
+            "name": "python",
+            "pygments_lexer": "ipython3",
+            "codemirror_mode": {
+              "name": "ipython",
+              "version": 3
+            },
+            "version": "3.7.9",
+            "nbconvert_exporter": "python",
+            "file_extension": ".py"
+          }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 0
+      },
+      "2113624e-c5b5-2096-2045-243a11dbee74": {
+        "cells": [{
+          "source": ["import requests\n", "experiment_name = spark.conf.get(\"spark.mlflow.experimentName\")"],
+          "execution_count": 7,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["def get_downlad_url():\n", "    response = requests.get(\"http://10.0.0.28:9090/v1/workflows\")\n", "    if response.status_code == 200:\n", "            json_data = response.json()\n", "            for obj in json_data:\n", "                if obj[\"name\"] == experiment_name:\n", "                    target_workflow = obj\n", "                    workflow_id = target_workflow[\"id\"]\n", "                    return f\"http://10.0.0.28:9090/v1/workflows/{workflow_id}/download?format=json&export-datasources=false\"\n", "    else:\n", "        return \"no URL found\""],
+          "execution_count": 10,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["print(get_downlad_url())"],
+          "execution_count": 11,
+          "outputs": [{
+            "name": "stdout",
+            "output_type": "stream",
+            "text": ["http://10.0.0.28:9090/v1/workflows/a9b1405a-771e-4c77-9b72-ae4c800fb7ec/download?format=json&export-datasources=false\n"]
+          }],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["import os\n", "import requests\n", "import git\n", "\n", "def download_commit_and_push(download_url, repo_path, file_name, commit_message):\n", "    \"\"\"\n", "    Downloads a file, saves it to a local Git repo, and pushes it to GitHub.\n", "    \"\"\"\n", "    try:\n", "        # --- 1. Download the File (with SSL verification disabled) ---\n", "        print(f\"Downloading file from {download_url}...\")\n", "        response = requests.get(download_url, verify=False)\n", "        response.raise_for_status()\n", "\n", "        # --- 2. Initialize Repo and Save File ---\n", "        repo = git.Repo(repo_path)\n", "        file_path = os.path.join(repo_path, file_name)\n", "        with open(file_path, \"w\", encoding=\"utf-8\") as f:\n", "            f.write(response.text)\n", "\n", "        # --- 3. Commit and Push (only if there are changes) ---\n", "        if not repo.is_dirty(path=file_path) and file_name not in repo.untracked_files:\n", "            print(\"No changes detected. Nothing to commit.\")\n", "            return\n", "\n", "        print(\"Staging, committing, and pushing changes...\")\n", "        repo.index.add([file_path])\n", "        repo.index.commit(commit_message)\n", "        repo.remotes.origin.push()\n", "\n", "        print(\"Workflow successfully committed and pushed to GitHub.\")\n", "\n", "    except git.InvalidGitRepositoryError:\n", "        print(f\"Error: '{repo_path}' is not a valid Git repository.\")\n", "    except requests.exceptions.RequestException as e:\n", "        print(f\"Error: Failed to download file. {e}\")\n", "    except Exception as e:\n", "        print(f\"An error occurred during Git operations: {e}\")\n"],
+          "execution_count": 6,
+          "outputs": [{
+            "ename": "SyntaxError",
+            "evalue": "EOL while scanning string literal (<ipython-input-6-cefea2a9d2d7>, line 31)",
+            "output_type": "error",
+            "traceback": ["\u001b[0;36m  File \u001b[0;32m\"<ipython-input-6-cefea2a9d2d7>\"\u001b[0;36m, line \u001b[0;32m31\u001b[0m\n\u001b[0;31m    print(\"Ã¢Â\u001b[0m\n\u001b[0m             ^\u001b[0m\n\u001b[0;31mSyntaxError\u001b[0m\u001b[0;31m:\u001b[0m EOL while scanning string literal\n"]
+          }],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["if __name__ == \"__main__\":\n", "    workflow_download_url = get_downlad_url()\n", "    local_git_repo_path = \"/opt/docker/source-control/Seahorse-Workflow-Manager\"\n", "    workflow_file_name = f\"{experiment_name}\" + \".json\"\n", "    commit_msg = f\"Automated update for {workflow_file_name}\"\n", "    download_commit_and_push(\n", "        download_url=workflow_download_url,\n", "        repo_path=local_git_repo_path,\n", "        file_name=workflow_file_name,\n", "        commit_message=commit_msg\n", "    )"],
+          "execution_count": 5,
+          "outputs": [{
+            "name": "stdout",
+            "output_type": "stream",
+            "text": ["Downloading file from https://10.0.0.28:9090/v1/workflows/a9b1405a-771e-4c77-9b72-ae4c800fb7ec/download?format=json&export-datasources=false...\n", "Error: Failed to download file. ('Connection aborted.', OSError(0, 'Error'))\n"]
+          }],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": [],
+          "execution_count": null,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": true
+          }
+        }],
+        "metadata": {
+          "kernelspec": {
+            "display_name": "PySpark",
+            "language": "python",
+            "name": "forwarding_kernel_py"
+          },
+          "language_info": {
+            "mimetype": "text/x-python",
+            "name": "python",
+            "pygments_lexer": "ipython3",
+            "codemirror_mode": {
+              "name": "ipython",
+              "version": 3
+            },
+            "version": "3.7.9",
+            "nbconvert_exporter": "python",
+            "file_extension": ".py"
+          }
+        },
+        "nbformat": 4,
+        "nbformat_minor": 0
+      }
+    },
+    "datasources": null
+  },
+  "variables": {
+
+  },
+  "id": "a9b1405a-771e-4c77-9b72-ae4c800fb7ec",
+  "metadata": {
+    "type": "batch",
+    "apiVersion": "1.4.3"
+  }
+}
