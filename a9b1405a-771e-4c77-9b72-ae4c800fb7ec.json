@@ -17,6 +17,15 @@
         "output column": "features"
       }
     }, {
+      "id": "affb6f6a-6257-83c7-f29f-773fe04bdbf2",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "import mlflow\r\nfrom sklearn.linear_model import LogisticRegression\r\nimport os\r\n\r\nexperiment_name = spark.conf.get(\"spark.workflow_id\")\r\nmlflow.set_experiment(experiment_name)\r\nmlflow.sklearn.autolog()\r\n\r\ndef write_run_id(path, run_id):\r\n    with open(path, \"w\") as f:\r\n        f.write(run_id)\r\n\r\ndef transform(dataframe):\r\n    with mlflow.start_run() as run:\r\n        df = dataframe.toPandas()\r\n        X = df.drop(columns=[\"Exited\"])\r\n        y = df[\"Exited\"]\r\n        run_id = run.info.run_id\r\n        \r\n        lr = LogisticRegression()\r\n        lr.fit(X, y)\r\n\r\n        write_run_id(f'/library/{experiment_name}', run_id)\r\n        return dataframe\r\n"
+      }
+    }, {
       "id": "a4042991-fcff-33d6-311d-ad784f60bf96",
       "operation": {
         "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
@@ -110,7 +119,7 @@
         "name": "Python Transformation"
       },
       "parameters": {
-        "code": "import pickle\r\nimport mlflow\r\nimport pandas as pd\r\nimport numpy as np\r\nfrom sklearn.metrics import (\r\n    roc_auc_score, accuracy_score, precision_score, recall_score, \r\n    f1_score, log_loss, confusion_matrix\r\n)\r\n\r\nexperiment_name = spark.conf.get(\"spark.mlflow.experimentName\")\r\n\r\ndef calc_pct_proba(y_pred_proba, classes, y_true, y_pred):\r\n    df_tmp = pd.DataFrame(y_pred_proba, columns=classes)\r\n    pct_proba = pd.DataFrame(\r\n        columns=['churn_percentile', 'population_by_percentile', \r\n                 'predicted_to_churn', 'min_proba', 'max_proba', \r\n                 'f1', 'accuracy', 'precision', 'recall']\r\n    )\r\n    df_tmp['pct'] = df_tmp[1].rank(pct=True) * 100\r\n    df_tmp['y_true'] = y_true.values\r\n    df_tmp['y_pred'] = y_pred\r\n    for i in range(96, -1, -4):\r\n        tmp_df = df_tmp[df_tmp['pct'] > i]\r\n        population = len(tmp_df)\r\n        pred_churn = len(tmp_df[tmp_df['y_pred'] == 1])\r\n        min_proba = tmp_df[1].min()\r\n        max_proba = tmp_df[1].max()\r\n        accuracy = accuracy_score(tmp_df['y_true'], tmp_df['y_pred'])\r\n        precision = precision_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n        recall = recall_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n        f1 = f1_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n\r\n        pct_proba.loc[len(pct_proba)] = (\r\n            i, population, pred_churn, min_proba, max_proba, f1, accuracy, precision, recall\r\n        )\r\n    return pct_proba\r\n    \r\ndef get_run_id(run_id_path):\r\n    with open(run_id_path, \"r\") as f:\r\n        run_id = f.read().strip()\r\n    return run_id\r\n\r\ndef transform(dataframe):\r\n\r\n    run_id = get_run_id(f'/library/{experiment_name}')\r\n    \r\n    df = dataframe.toPandas()\r\n    X_test = df.drop(columns=[\"Exited\"])\r\n    y_test = df[\"Exited\"]\r\n\r\n    with mlflow.start_run(run_id = run_id):\r\n        \r\n        lr = mlflow.sklearn.load_model(f\"runs:/{run_id}/model\")\r\n        y_pred = lr.predict(X_test)\r\n        y_pred_proba = lr.predict_proba(X_test)\r\n        \r\n        mlflow.log_metric(\"roc_auc\", np.float64(roc_auc_score(y_test, y_pred)))\r\n        mlflow.log_metric(\"accuracy\", np.float64(accuracy_score(y_test, y_pred)))\r\n        mlflow.log_metric(\"precision\", np.float64(precision_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"recall\", np.float64(recall_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"f1_score\", np.float64(f1_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"log_loss\", np.float64(log_loss(y_test, y_pred_proba)))\r\n        \r\n        conf_matrix = pd.DataFrame(confusion_matrix(y_test, y_pred))\r\n        conf_matrix.to_csv(\"confusion_matrix_logged.csv\", index=False)\r\n        mlflow.log_artifact(\"confusion_matrix_logged.csv\")\r\n        \r\n        proba_df = calc_pct_proba(y_pred_proba, lr.classes_, y_test, y_pred)\r\n        proba_df.to_csv(\"proba_df_logged.csv\", index=False)\r\n        mlflow.log_artifact(\"proba_df_logged.csv\")\r\n        \r\n        example_input = X_test.head(5)\r\n        example_input.to_csv(\"example_input.csv\", index=False)\r\n        mlflow.log_artifact(\"example_input.csv\")\r\n        \r\n        feature_names = list(X_test.columns)\r\n        with open(\"feature_names.txt\", \"w\") as f:\r\n            f.write(\"\\n\".join(feature_names))\r\n        mlflow.log_artifact(\"feature_names.txt\")\r\n\r\n    mlflow.end_run()\r\n    return dataframe"
+        "code": "import pickle\r\nimport mlflow\r\nimport pandas as pd\r\nimport numpy as np\r\nfrom sklearn.metrics import (\r\n    roc_auc_score, accuracy_score, precision_score, recall_score, \r\n    f1_score, log_loss, confusion_matrix\r\n)\r\n\r\nexperiment_name = spark.conf.get(\"spark.workflow_id\")\r\n\r\ndef calc_pct_proba(y_pred_proba, classes, y_true, y_pred):\r\n    df_tmp = pd.DataFrame(y_pred_proba, columns=classes)\r\n    pct_proba = pd.DataFrame(\r\n        columns=['churn_percentile', 'population_by_percentile', \r\n                 'predicted_to_churn', 'min_proba', 'max_proba', \r\n                 'f1', 'accuracy', 'precision', 'recall']\r\n    )\r\n    df_tmp['pct'] = df_tmp[1].rank(pct=True) * 100\r\n    df_tmp['y_true'] = y_true.values\r\n    df_tmp['y_pred'] = y_pred\r\n    for i in range(96, -1, -4):\r\n        tmp_df = df_tmp[df_tmp['pct'] > i]\r\n        population = len(tmp_df)\r\n        pred_churn = len(tmp_df[tmp_df['y_pred'] == 1])\r\n        min_proba = tmp_df[1].min()\r\n        max_proba = tmp_df[1].max()\r\n        accuracy = accuracy_score(tmp_df['y_true'], tmp_df['y_pred'])\r\n        precision = precision_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n        recall = recall_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n        f1 = f1_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\r\n\r\n        pct_proba.loc[len(pct_proba)] = (\r\n            i, population, pred_churn, min_proba, max_proba, f1, accuracy, precision, recall\r\n        )\r\n    return pct_proba\r\n    \r\ndef get_run_id(run_id_path):\r\n    with open(run_id_path, \"r\") as f:\r\n        run_id = f.read().strip()\r\n    return run_id\r\n\r\ndef transform(dataframe):\r\n\r\n    run_id = get_run_id(f'/library/{experiment_name}')\r\n    \r\n    df = dataframe.toPandas()\r\n    X_test = df.drop(columns=[\"Exited\"])\r\n    y_test = df[\"Exited\"]\r\n\r\n    with mlflow.start_run(run_id = run_id):\r\n        \r\n        lr = mlflow.sklearn.load_model(f\"runs:/{run_id}/model\")\r\n        y_pred = lr.predict(X_test)\r\n        y_pred_proba = lr.predict_proba(X_test)\r\n        \r\n        mlflow.log_metric(\"roc_auc\", np.float64(roc_auc_score(y_test, y_pred)))\r\n        mlflow.log_metric(\"accuracy\", np.float64(accuracy_score(y_test, y_pred)))\r\n        mlflow.log_metric(\"precision\", np.float64(precision_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"recall\", np.float64(recall_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"f1_score\", np.float64(f1_score(y_test, y_pred, zero_division=0)))\r\n        mlflow.log_metric(\"log_loss\", np.float64(log_loss(y_test, y_pred_proba)))\r\n        \r\n        conf_matrix = pd.DataFrame(confusion_matrix(y_test, y_pred))\r\n        conf_matrix.to_csv(\"confusion_matrix_logged.csv\", index=False)\r\n        mlflow.log_artifact(\"confusion_matrix_logged.csv\")\r\n        \r\n        proba_df = calc_pct_proba(y_pred_proba, lr.classes_, y_test, y_pred)\r\n        proba_df.to_csv(\"proba_df_logged.csv\", index=False)\r\n        mlflow.log_artifact(\"proba_df_logged.csv\")\r\n        \r\n        example_input = X_test.head(5)\r\n        example_input.to_csv(\"example_input.csv\", index=False)\r\n        mlflow.log_artifact(\"example_input.csv\")\r\n        \r\n        feature_names = list(X_test.columns)\r\n        with open(\"feature_names.txt\", \"w\") as f:\r\n            f.write(\"\\n\".join(feature_names))\r\n        mlflow.log_artifact(\"feature_names.txt\")\r\n\r\n    mlflow.end_run()\r\n    return dataframe"
       }
     }, {
       "id": "baeb7490-f282-fb49-38cb-85962a24644c",
@@ -131,15 +140,6 @@
         "data source": "9bc247cf-50d3-ab01-6fd3-b6e37e5b91ea"
       }
     }, {
-      "id": "1bf03855-c0e3-6fd5-add0-450b506be95f",
-      "operation": {
-        "id": "e76ca616-0322-47a5-b390-70c9668265dd",
-        "name": "Python Notebook"
-      },
-      "parameters": {
-
-      }
-    }, {
       "id": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
       "operation": {
         "id": "d273c42f-b840-4402-ba6b-18282cc68de3",
@@ -151,15 +151,6 @@
             "split ratio": 0.2
           }
         }
-      }
-    }, {
-      "id": "affb6f6a-6257-83c7-f29f-773fe04bdbf2",
-      "operation": {
-        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
-        "name": "Python Transformation"
-      },
-      "parameters": {
-        "code": "import mlflow\r\nfrom sklearn.linear_model import LogisticRegression\r\nimport os\r\n\r\nexperiment_name = spark.conf.get(\"spark.mlflow.experimentName\")\r\nmlflow.set_experiment(experiment_name)\r\nmlflow.sklearn.autolog()\r\n\r\ndef write_run_id(path, run_id):\r\n    with open(path, \"w\") as f:\r\n        f.write(run_id)\r\n\r\ndef transform(dataframe):\r\n    with mlflow.start_run() as run:\r\n        df = dataframe.toPandas()\r\n        X = df.drop(columns=[\"Exited\"])\r\n        y = df[\"Exited\"]\r\n        run_id = run.info.run_id\r\n        \r\n        lr = LogisticRegression()\r\n        lr.fit(X, y)\r\n\r\n        write_run_id(f'/library/{experiment_name}', run_id)\r\n        return dataframe\r\n"
       }
     }, {
       "id": "193f247e-dd3e-c407-79c2-f56440133ea3",
@@ -265,15 +256,6 @@
       }
     }, {
       "from": {
-        "nodeId": "baeb7490-f282-fb49-38cb-85962a24644c",
-        "portIndex": 0
-      },
-      "to": {
-        "nodeId": "1bf03855-c0e3-6fd5-add0-450b506be95f",
-        "portIndex": 0
-      }
-    }, {
-      "from": {
         "nodeId": "e98c50a3-9692-b6c7-23c8-b617f9dc0347",
         "portIndex": 0
       },
@@ -344,14 +326,14 @@
           "color": "#00B1EB",
           "coordinates": {
             "x": 8452,
-            "y": 9778
+            "y": 9780
           }
         },
         "b619d80c-6c1c-7025-d778-2bad73c7605b": {
           "uiName": "",
           "color": "#00B1EB",
           "coordinates": {
-            "x": 8094,
+            "x": 8096,
             "y": 9787
           }
         },
@@ -391,7 +373,7 @@
           "uiName": "Uploading to Source Control",
           "color": "#00B1EB",
           "coordinates": {
-            "x": 8753,
+            "x": 8751,
             "y": 9860
           }
         },
@@ -401,14 +383,6 @@
           "coordinates": {
             "x": 9074,
             "y": 9667
-          }
-        },
-        "1bf03855-c0e3-6fd5-add0-450b506be95f": {
-          "uiName": "",
-          "color": "#00B1EB",
-          "coordinates": {
-            "x": 7870,
-            "y": 9585
           }
         },
         "e98c50a3-9692-b6c7-23c8-b617f9dc0347": {
@@ -423,7 +397,7 @@
           "uiName": "Training the model",
           "color": "#00B1EB",
           "coordinates": {
-            "x": 8948,
+            "x": 8946,
             "y": 9765
           }
         },
@@ -508,35 +482,7 @@
       },
       "2113624e-c5b5-2096-2045-243a11dbee74": {
         "cells": [{
-          "source": ["import requests\n", "experiment_name = spark.conf.get(\"spark.mlflow.experimentName\")"],
-          "execution_count": 2,
-          "outputs": [],
-          "cell_type": "code",
-          "metadata": {
-            "collapsed": false
-          }
-        }, {
-          "source": ["# def get_download_url():\n", "#     response = requests.get(\"http://10.0.0.28:9090/v1/workflows\")\n", "#     if response.status_code == 200:\n", "#             json_data = response.json()\n", "#             for obj in json_data:\n", "#                 if obj[\"name\"] == experiment_name:\n", "#                     target_workflow = obj\n", "#                     workflow_id = target_workflow[\"id\"]\n", "#                     return f\"http://10.0.0.28:9090/v1/workflows/{workflow_id}/download?format=json&export-datasources=false\"\n", "#     else:\n", "#         return \"no URL found\"\n", "\n", "def get_download_url():\n", "    return f\"http://10.0.0.28:9090/v1/workflows/{experiment_name}/download?format=json&export-datasources=false\""],
-          "execution_count": 10,
-          "outputs": [],
-          "cell_type": "code",
-          "metadata": {
-            "collapsed": false
-          }
-        }, {
-          "source": ["print(get_download_url())"],
-          "execution_count": 11,
-          "outputs": [{
-            "name": "stdout",
-            "output_type": "stream",
-            "text": ["http://10.0.0.28:9090/v1/workflows/a9b1405a-771e-4c77-9b72-ae4c800fb7ec/download?format=json&export-datasources=false\n"]
-          }],
-          "cell_type": "code",
-          "metadata": {
-            "collapsed": false
-          }
-        }, {
-          "source": ["import os\n", "import requests\n", "import git\n", "\n", "def download_commit_and_push(download_url, repo_path, file_name, commit_message):\n", "    \"\"\"\n", "    Downloads a file, saves it to a local Git repo, and pushes it to GitHub.\n", "    \"\"\"\n", "    try:\n", "        # --- 1. Download the File (with SSL verification disabled) ---\n", "        print(f\"Downloading file from {download_url}...\")\n", "        response = requests.get(download_url, verify=False)\n", "        response.raise_for_status()\n", "\n", "        # --- 2. Initialize Repo and Save File ---\n", "        repo = git.Repo(repo_path)\n", "        file_path = os.path.join(repo_path, file_name)\n", "        with open(file_path, \"w\", encoding=\"utf-8\") as f:\n", "            f.write(response.text)\n", "\n", "        # --- 3. Commit and Push (only if there are changes) ---\n", "        if not repo.is_dirty(path=file_path) and file_name not in repo.untracked_files:\n", "            print(\"No changes detected. Nothing to commit.\")\n", "            return\n", "\n", "        print(\"Staging, committing, and pushing changes...\")\n", "        repo.index.add([file_path])\n", "        repo.index.commit(commit_message)\n", "        repo.remotes.origin.push()\n", "\n", "        print(\"Workflow successfully committed and pushed to GitHub.\")\n", "\n", "    except git.InvalidGitRepositoryError:\n", "        print(f\"Error: '{repo_path}' is not a valid Git repository.\")\n", "    except requests.exceptions.RequestException as e:\n", "        print(f\"Error: Failed to download file. {e}\")\n", "    except Exception as e:\n", "        print(f\"An error occurred during Git operations: {e}\")\n"],
+          "source": ["import requests\n", "experiment_name = spark.conf.get(\"spark.workflow_id\")"],
           "execution_count": null,
           "outputs": [],
           "cell_type": "code",
@@ -544,12 +490,56 @@
             "collapsed": false
           }
         }, {
-          "source": ["if __name__ == \"__main__\":\n", "    workflow_download_url = get_downlad_url()\n", "    local_git_repo_path = \"/opt/docker/source-control/Seahorse-Workflow-Manager\"\n", "    workflow_file_name = f\"{experiment_name}\" + \".json\"\n", "    commit_msg = f\"Automated update for {workflow_file_name}\"\n", "    download_commit_and_push(\n", "        download_url=workflow_download_url,\n", "        repo_path=local_git_repo_path,\n", "        file_name=workflow_file_name,\n", "        commit_message=commit_msg\n", "    )"],
-          "execution_count": 13,
+          "source": ["def get_download_url():\n", "    try:\n", "        return f\"http://10.0.0.28:9090/v1/workflows/{experiment_name}/download?format=json&export-datasources=false\"\n", "    except:\n", "        return \"Please check if in Local, you have passed the workflow id correctly\""],
+          "execution_count": null,
           "outputs": [],
           "cell_type": "code",
           "metadata": {
             "collapsed": false
+          }
+        }, {
+          "source": ["print(get_download_url())"],
+          "execution_count": null,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["import os\n", "import requests\n", "import git\n", "\n", "def download_commit_and_push(download_url, repo_path, file_name, commit_message):\n", "    \"\"\"\n", "    Downloads a file, saves it to a local Git repo, and pushes it to GitHub.\n", "    \"\"\"\n", "    try:\n", "        # --- 1. Download the File (with SSL verification disabled) ---\n", "        print(f\"Downloading file from {download_url}...\")\n", "        response = requests.get(download_url, verify=False)\n", "        response.raise_for_status()\n", "\n", "        # --- 2. Initialize Repo and Save File ---\n", "        repo = git.Repo(repo_path)\n", "        file_path = os.path.join(repo_path, file_name)\n", "        with open(file_path, \"w\", encoding=\"utf-8\") as f:\n", "            f.write(response.text)\n", "\n", "        # --- 3. Commit and Push (only if there are changes) ---\n", "        if not repo.is_dirty(path=file_path) and file_name not in repo.untracked_files:\n", "            print(\"No changes detected. Nothing to commit.\")\n", "            return\n", "\n", "        print(\"Staging, committing, and pushing changes...\")\n", "        repo.index.add([file_path])\n", "        repo.index.commit(commit_message)\n", "        repo.remotes.origin.push()\n", "\n", "        print(\"Workflow successfully committed and pushed to GitHub.\")\n", "\n", "    except git.InvalidGitRepositoryError:\n", "        print(f\"Error: '{repo_path}' is not a valid Git repository.\")\n", "    except requests.exceptions.RequestException as e:\n", "        print(f\"Error: Failed to download file. {e}\")\n", "    except Exception as e:\n", "        print(f\"An error occurred during Git operations: {e}\")\n"],
+          "execution_count": 24,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": ["workflow_download_url = get_download_url()\n", "local_git_repo_path = \"/library/Seahorse-Workflow-Manager\"\n", "workflow_file_name = f\"{experiment_name}\" + \".json\"\n", "commit_msg = f\"Automated update for {workflow_file_name}\"\n", "download_commit_and_push(\n", "    download_url=workflow_download_url,\n", "    repo_path=local_git_repo_path,\n", "    file_name=workflow_file_name,\n", "    commit_message=commit_msg\n", ")"],
+          "execution_count": null,
+          "outputs": [{
+            "name": "stdout",
+            "output_type": "stream",
+            "text": ["Downloading file from http://10.0.0.28:9090/v1/workflows/a9b1405a-771e-4c77-9b72-ae4c800fb7ec/download?format=json&export-datasources=false...\n", "An error occurred during Git operations: Cmd('git') failed due to: exit code(129)\n", "  cmdline: git diff --cached --abbrev=40 --full-index --raw -- /library/Seahorse-Workflow-Manager/a9b1405a-771e-4c77-9b72-ae4c800fb7ec.json\n", "  stderr: 'error: unknown option `cached'\n", "usage: git diff --no-index [<options>] <path> <path>\n", "\n", "Diff output format options\n", "    -p, --patch           generate patch\n", "    -s, --no-patch        suppress diff output\n", "    -u                    generate patch\n", "    -U, --unified[=<n>]   generate diffs with <n> lines context\n", "    -W, --[no-]function-context\n", "                          generate diffs with <n> lines context\n", "    --raw                 generate the diff in raw format\n", "    --patch-with-raw      synonym for '-p --raw'\n", "    --patch-with-stat     synonym for '-p --stat'\n", "    --numstat             machine friendly --stat\n", "    --shortstat           output only the last line of --stat\n", "    -X, --dirstat[=<param1,param2>...]\n", "                          output the distribution of relative amount of changes for each sub-directory\n", "    --cumulative          synonym for --dirstat=cumulative\n", "    --dirstat-by-file[=<param1,param2>...]\n", "                          synonym for --dirstat=files,param1,param2...\n", "    --check               warn if changes introduce conflict markers or whitespace errors\n", "    --summary             condensed summary such as creations, renames and mode changes\n", "    --name-only           show only names of changed files\n", "    --name-status         show only names and status of changed files\n", "    --stat[=<width>[,<name-width>[,<count>]]]\n", "                          generate diffstat\n", "    --stat-width <width>  generate diffstat with a given width\n", "    --stat-name-width <width>\n", "                          generate diffstat with a given name width\n", "    --stat-graph-width <width>\n", "                          generate diffstat with a given graph width\n", "    --stat-count <count>  generate diffstat with limited lines\n", "    --[no-]compact-summary\n", "                          generate compact summary in diffstat\n", "    --binary              output a binary diff that can be applied\n", "    --[no-]full-index     show full pre- and post-image object names on the \"index\" lines\n", "    --[no-]color[=<when>] show colored diff\n", "    --ws-error-highlight <kind>\n", "                          highlight whitespace errors in the 'context', 'old' or 'new' lines in the diff\n", "    -z                    do not munge pathnames and use NULs as output field terminators in --raw or --numstat\n", "    --[no-]abbrev[=<n>]   use <n> digits to display object names\n", "    --src-prefix <prefix> show the given source prefix instead of \"a/\"\n", "    --dst-prefix <prefix> show the given destination prefix instead of \"b/\"\n", "    --line-prefix <prefix>\n", "                          prepend an additional prefix to every line of output\n", "    --no-prefix           do not show any source or destination prefix\n", "    --default-prefix      use default prefixes a/ and b/\n", "    --inter-hunk-context <n>\n", "                          show context between diff hunks up to the specified number of lines\n", "    --output-indicator-new <char>\n", "                          specify the character to indicate a new line instead of '+'\n", "    --output-indicator-old <char>\n", "                          specify the character to indicate an old line instead of '-'\n", "    --output-indicator-context <char>\n", "                          specify the character to indicate a context instead of ' '\n", "\n", "Diff rename options\n", "    -B, --break-rewrites[=<n>[/<m>]]\n", "                          break complete rewrite changes into pairs of delete and create\n", "    -M, --find-renames[=<n>]\n", "                          detect renames\n", "    -D, --irreversible-delete\n", "                          omit the preimage for deletes\n", "    -C, --find-copies[=<n>]\n", "                          detect copies\n", "    --[no-]find-copies-harder\n", "                          use unmodified files as source to find copies\n", "    --no-renames          disable rename detection\n", "    --[no-]rename-empty   use empty blobs as rename source\n", "    --[no-]follow         continue listing the history of a file beyond renames\n", "    -l <n>                prevent rename/copy detection if the number of rename/copy targets exceeds given limit\n", "\n", "Diff algorithm options\n", "    --minimal             produce the smallest possible diff\n", "    -w, --ignore-all-space\n", "                          ignore whitespace when comparing lines\n", "    -b, --ignore-space-change\n", "                          ignore changes in amount of whitespace\n", "    --ignore-space-at-eol ignore changes in whitespace at EOL\n", "    --ignore-cr-at-eol    ignore carrier-return at the end of line\n", "    --ignore-blank-lines  ignore changes whose lines are all blank\n", "    -I, --[no-]ignore-matching-lines <regex>\n", "                          ignore changes whose all lines match <regex>\n", "    --[no-]indent-heuristic\n", "                          heuristic to shift diff hunk boundaries for easy reading\n", "    --patience            generate diff using the \"patience diff\" algorithm\n", "    --histogram           generate diff using the \"histogram diff\" algorithm\n", "    --diff-algorithm <algorithm>\n", "                          choose a diff algorithm\n", "    --anchored <text>     generate diff using the \"anchored diff\" algorithm\n", "    --word-diff[=<mode>]  show word diff, using <mode> to delimit changed words\n", "    --word-diff-regex <regex>\n", "                          use <regex> to decide what a word is\n", "    --color-words[=<regex>]\n", "                          equivalent to --word-diff=color --word-diff-regex=<regex>\n", "    --[no-]color-moved[=<mode>]\n", "                          moved lines of code are colored differently\n", "    --[no-]color-moved-ws <mode>\n", "                          how white spaces are ignored in --color-moved\n", "\n", "Other diff options\n", "    --[no-]relative[=<prefix>]\n", "                          when run from subdir, exclude changes outside and show relative paths\n", "    -a, --[no-]text       treat all files as text\n", "    -R                    swap two inputs, reverse the diff\n", "    --[no-]exit-code      exit with 1 if there were differences, 0 otherwise\n", "    --[no-]quiet          disable all output of the program\n", "    --[no-]ext-diff       allow an external diff helper to be executed\n", "    --[no-]textconv       run external text conversion filters when comparing binary files\n", "    --ignore-submodules[=<when>]\n", "                          ignore changes to submodules in the diff generation\n", "    --submodule[=<format>]\n", "                          specify how differences in submodules are shown\n", "    --ita-invisible-in-index\n", "                          hide 'git add -N' entries from the index\n", "    --ita-visible-in-index\n", "                          treat 'git add -N' entries as real in the index\n", "    -S <string>           look for differences that change the number of occurrences of the specified string\n", "    -G <regex>            look for differences that change the number of occurrences of the specified regex\n", "    --pickaxe-all         show all changes in the changeset with -S or -G\n", "    --pickaxe-regex       treat <string> in -S as extended POSIX regular expression\n", "    -O <file>             control the order in which files appear in the output\n", "    --rotate-to <path>    show the change in the specified path first\n", "    --skip-to <path>      skip the output to the specified path\n", "    --find-object <object-id>\n", "                          look for differences that change the number of occurrences of the specified object\n", "    --diff-filter [(A|C|D|M|R|T|U|X|B)...[*]]\n", "                          select files by diff type\n", "    --output <file>       output to a specific file\n", "'\n"]
+          }],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": false
+          }
+        }, {
+          "source": [],
+          "execution_count": null,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": true
+          }
+        }, {
+          "source": [],
+          "execution_count": null,
+          "outputs": [],
+          "cell_type": "code",
+          "metadata": {
+            "collapsed": true
           }
         }],
         "metadata": {
