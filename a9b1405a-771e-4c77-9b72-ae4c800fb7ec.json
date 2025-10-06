@@ -131,6 +131,15 @@
         "data source": "9bc247cf-50d3-ab01-6fd3-b6e37e5b91ea"
       }
     }, {
+      "id": "1bf03855-c0e3-6fd5-add0-450b506be95f",
+      "operation": {
+        "id": "e76ca616-0322-47a5-b390-70c9668265dd",
+        "name": "Python Notebook"
+      },
+      "parameters": {
+
+      }
+    }, {
       "id": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
       "operation": {
         "id": "d273c42f-b840-4402-ba6b-18282cc68de3",
@@ -252,6 +261,15 @@
       },
       "to": {
         "nodeId": "b619d80c-6c1c-7025-d778-2bad73c7605b",
+        "portIndex": 0
+      }
+    }, {
+      "from": {
+        "nodeId": "baeb7490-f282-fb49-38cb-85962a24644c",
+        "portIndex": 0
+      },
+      "to": {
+        "nodeId": "1bf03855-c0e3-6fd5-add0-450b506be95f",
         "portIndex": 0
       }
     }, {
@@ -385,6 +403,14 @@
             "y": 9667
           }
         },
+        "1bf03855-c0e3-6fd5-add0-450b506be95f": {
+          "uiName": "",
+          "color": "#00B1EB",
+          "coordinates": {
+            "x": 7870,
+            "y": 9585
+          }
+        },
         "e98c50a3-9692-b6c7-23c8-b617f9dc0347": {
           "uiName": "",
           "color": "#00B1EB",
@@ -490,8 +516,8 @@
             "collapsed": false
           }
         }, {
-          "source": ["def get_downlad_url():\n", "    response = requests.get(\"http://10.0.0.28:9090/v1/workflows\")\n", "    if response.status_code == 200:\n", "            json_data = response.json()\n", "            for obj in json_data:\n", "                if obj[\"name\"] == experiment_name:\n", "                    target_workflow = obj\n", "                    workflow_id = target_workflow[\"id\"]\n", "                    return f\"http://10.0.0.28:9090/v1/workflows/{workflow_id}/download?format=json&export-datasources=false\"\n", "    else:\n", "        return \"no URL found\""],
-          "execution_count": 10,
+          "source": ["# def get_downlad_url():\n", "#     response = requests.get(\"http://10.0.0.28:9090/v1/workflows\")\n", "#     if response.status_code == 200:\n", "#             json_data = response.json()\n", "#             for obj in json_data:\n", "#                 if obj[\"name\"] == experiment_name:\n", "#                     target_workflow = obj\n", "#                     workflow_id = target_workflow[\"id\"]\n", "#                     return f\"http://10.0.0.28:9090/v1/workflows/{workflow_id}/download?format=json&export-datasources=false\"\n", "#     else:\n", "#         return \"no URL found\"\n", "\n", "get_download_url():\n", "    return f\"http://10.0.0.28:9090/v1/workflows/{experiment_name}/download?format=json&export-datasources=false\""],
+          "execution_count": 12,
           "outputs": [],
           "cell_type": "code",
           "metadata": {
@@ -499,7 +525,7 @@
           }
         }, {
           "source": ["print(get_downlad_url())"],
-          "execution_count": 11,
+          "execution_count": 14,
           "outputs": [{
             "name": "stdout",
             "output_type": "stream",
@@ -511,24 +537,19 @@
           }
         }, {
           "source": ["import os\n", "import requests\n", "import git\n", "\n", "def download_commit_and_push(download_url, repo_path, file_name, commit_message):\n", "    \"\"\"\n", "    Downloads a file, saves it to a local Git repo, and pushes it to GitHub.\n", "    \"\"\"\n", "    try:\n", "        # --- 1. Download the File (with SSL verification disabled) ---\n", "        print(f\"Downloading file from {download_url}...\")\n", "        response = requests.get(download_url, verify=False)\n", "        response.raise_for_status()\n", "\n", "        # --- 2. Initialize Repo and Save File ---\n", "        repo = git.Repo(repo_path)\n", "        file_path = os.path.join(repo_path, file_name)\n", "        with open(file_path, \"w\", encoding=\"utf-8\") as f:\n", "            f.write(response.text)\n", "\n", "        # --- 3. Commit and Push (only if there are changes) ---\n", "        if not repo.is_dirty(path=file_path) and file_name not in repo.untracked_files:\n", "            print(\"No changes detected. Nothing to commit.\")\n", "            return\n", "\n", "        print(\"Staging, committing, and pushing changes...\")\n", "        repo.index.add([file_path])\n", "        repo.index.commit(commit_message)\n", "        repo.remotes.origin.push()\n", "\n", "        print(\"Workflow successfully committed and pushed to GitHub.\")\n", "\n", "    except git.InvalidGitRepositoryError:\n", "        print(f\"Error: '{repo_path}' is not a valid Git repository.\")\n", "    except requests.exceptions.RequestException as e:\n", "        print(f\"Error: Failed to download file. {e}\")\n", "    except Exception as e:\n", "        print(f\"An error occurred during Git operations: {e}\")\n"],
-          "execution_count": 6,
-          "outputs": [{
-            "ename": "SyntaxError",
-            "evalue": "EOL while scanning string literal (<ipython-input-6-cefea2a9d2d7>, line 31)",
-            "output_type": "error",
-            "traceback": ["\u001b[0;36m  File \u001b[0;32m\"<ipython-input-6-cefea2a9d2d7>\"\u001b[0;36m, line \u001b[0;32m31\u001b[0m\n\u001b[0;31m    print(\"Ã¢Â\u001b[0m\n\u001b[0m             ^\u001b[0m\n\u001b[0;31mSyntaxError\u001b[0m\u001b[0;31m:\u001b[0m EOL while scanning string literal\n"]
-          }],
+          "execution_count": 15,
+          "outputs": [],
           "cell_type": "code",
           "metadata": {
             "collapsed": false
           }
         }, {
           "source": ["if __name__ == \"__main__\":\n", "    workflow_download_url = get_downlad_url()\n", "    local_git_repo_path = \"/opt/docker/source-control/Seahorse-Workflow-Manager\"\n", "    workflow_file_name = f\"{experiment_name}\" + \".json\"\n", "    commit_msg = f\"Automated update for {workflow_file_name}\"\n", "    download_commit_and_push(\n", "        download_url=workflow_download_url,\n", "        repo_path=local_git_repo_path,\n", "        file_name=workflow_file_name,\n", "        commit_message=commit_msg\n", "    )"],
-          "execution_count": 5,
+          "execution_count": null,
           "outputs": [{
             "name": "stdout",
             "output_type": "stream",
-            "text": ["Downloading file from https://10.0.0.28:9090/v1/workflows/a9b1405a-771e-4c77-9b72-ae4c800fb7ec/download?format=json&export-datasources=false...\n", "Error: Failed to download file. ('Connection aborted.', OSError(0, 'Error'))\n"]
+            "text": ["Downloading file from http://10.0.0.28:9090/v1/workflows/a9b1405a-771e-4c77-9b72-ae4c800fb7ec/download?format=json&export-datasources=false...\n", "Staging, committing, and pushing changes...\n"]
           }],
           "cell_type": "code",
           "metadata": {
