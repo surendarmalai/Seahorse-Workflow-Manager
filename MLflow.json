@@ -17,6 +17,15 @@
         "output column": "features"
       }
     }, {
+      "id": "ca6783fc-375a-3d0c-2e73-f39fbdbe7930",
+      "operation": {
+        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
+        "name": "Python Transformation"
+      },
+      "parameters": {
+        "code": "import os\nimport requests\nimport git\n#this node\nworkflow_id = spark.conf.get(\"spark.workflow_id\")\nexperiment_name = spark.conf.get(\"spark.experiment_name\")\n\ndef download_commit_and_push(download_url, repo_path, file_name, commit_message):\n    try:\n        # Download the File\n        print(f\"Downloading file from {download_url}...\")\n        response = requests.get(download_url, verify=False)\n        response.raise_for_status()\n\n        # Initialize Repo and Save File\n        repo = git.Repo(repo_path)\n        file_path = os.path.join(repo_path, file_name)\n        with open(file_path, \"w\", encoding=\"utf-8\") as f:\n            f.write(response.text)\n\n        # Commit and Push\n        if not repo.is_dirty(path=file_path) and file_name not in repo.untracked_files:\n            print(\"No changes detected. Nothing to commit.\")\n            return\n\n        print(\"Staging, committing, and pushing changes...\")\n        repo.index.add([file_path])\n        repo.index.commit(commit_message)\n        repo.remotes.origin.push()\n\n        print(\"Workflow successfully committed and pushed to GitHub.\")\n\n    except git.InvalidGitRepositoryError:\n        print(f\"Error: '{repo_path}' is not a valid Git repository.\")\n    except requests.exceptions.RequestException as e:\n        print(f\"Error: Failed to download file. {e}\")\n    except Exception as e:\n        print(f\"An error occurred during Git operations: {e}\")\n\ndef get_download_url():\n    try:\n        return f\"http://10.0.0.28:9090/v1/workflows/{workflow_id}/download?format=json&export-datasources=false\"\n    except:\n        return \"Please check if in Local, you have passed the workflow id correctly\"\n\ndef transform(dataframe):\n    workflow_download_url = get_download_url()\n    local_git_repo_path = \"/library/Seahorse-Workflow-Manager\"\n    workflow_file_name = f\"{experiment_name}\" + \".json\"\n    commit_msg = f\"Automated update for {workflow_file_name}\"\n    download_commit_and_push(\n        download_url=workflow_download_url,\n        repo_path=local_git_repo_path,\n        file_name=workflow_file_name,\n        commit_message=commit_msg\n    )\n    return dataframe"
+      }
+    }, {
       "id": "a4042991-fcff-33d6-311d-ad784f60bf96",
       "operation": {
         "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
@@ -45,15 +54,6 @@
           "type": "column",
           "value": "features"
         }
-      }
-    }, {
-      "id": "ca6783fc-375a-3d0c-2e73-f39fbdbe7930",
-      "operation": {
-        "id": "a721fe2a-5d7f-44b3-a1e7-aade16252ead",
-        "name": "Python Transformation"
-      },
-      "parameters": {
-        "code": "import os\nimport requests\nimport git\n\nworkflow_id = spark.conf.get(\"spark.workflow_id\")\nexperiment_name = spark.conf.get(\"spark.experiment_name\")\n\ndef download_commit_and_push(download_url, repo_path, file_name, commit_message):\n    try:\n        # Download the File\n        print(f\"Downloading file from {download_url}...\")\n        response = requests.get(download_url, verify=False)\n        response.raise_for_status()\n\n        # Initialize Repo and Save File\n        repo = git.Repo(repo_path)\n        file_path = os.path.join(repo_path, file_name)\n        with open(file_path, \"w\", encoding=\"utf-8\") as f:\n            f.write(response.text)\n\n        # Commit and Push\n        if not repo.is_dirty(path=file_path) and file_name not in repo.untracked_files:\n            print(\"No changes detected. Nothing to commit.\")\n            return\n\n        print(\"Staging, committing, and pushing changes...\")\n        repo.index.add([file_path])\n        repo.index.commit(commit_message)\n        repo.remotes.origin.push()\n\n        print(\"Workflow successfully committed and pushed to GitHub.\")\n\n    except git.InvalidGitRepositoryError:\n        print(f\"Error: '{repo_path}' is not a valid Git repository.\")\n    except requests.exceptions.RequestException as e:\n        print(f\"Error: Failed to download file. {e}\")\n    except Exception as e:\n        print(f\"An error occurred during Git operations: {e}\")\n\ndef get_download_url():\n    try:\n        return f\"http://10.0.0.28:9090/v1/workflows/{workflow_id}/download?format=json&export-datasources=false\"\n    except:\n        return \"Please check if in Local, you have passed the workflow id correctly\"\n\ndef transform(dataframe):\n    workflow_download_url = get_download_url()\n    local_git_repo_path = \"/library/Seahorse-Workflow-Manager\"\n    workflow_file_name = f\"{experiment_name}\" + \".json\"\n    commit_msg = f\"Automated update for {workflow_file_name}\"\n    download_commit_and_push(\n        download_url=workflow_download_url,\n        repo_path=local_git_repo_path,\n        file_name=workflow_file_name,\n        commit_message=commit_msg\n    )\n    return dataframe"
       }
     }, {
       "id": "52c2df24-1c83-ad70-9ea9-303c47688bec",
