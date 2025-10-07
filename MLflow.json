@@ -44,6 +44,19 @@
         "code": "from pyspark.ml.linalg import VectorUDT\r\nimport pandas as pd\r\n\r\ndef transform(dataframe):\r\n    df = dataframe.toPandas()\r\n    df['features'] = df['features'].apply(lambda x: x.toArray() if hasattr(x, 'toArray') else x)\r\n\r\n    # Assign back to original columns\r\n    df['CreditScore'] = df['features'].apply(lambda x: x[0])\r\n    df['Age'] = df['features'].apply(lambda x: x[1])\r\n    df['Tenure'] = df['features'].apply(lambda x: x[2])\r\n    df['Balance'] = df['features'].apply(lambda x: x[3])\r\n    df['NumOfProducts'] = df['features'].apply(lambda x: x[4])\r\n    df['HasCrCard'] = df['features'].apply(lambda x: x[5])\r\n    df['IsActiveMember'] = df['features'].apply(lambda x: x[6])\r\n    df['EstimatedSalary'] = df['features'].apply(lambda x: x[7])\r\n    df['Geography_Germany'] = df['features'].apply(lambda x: x[8])\r\n    df['Geography_Spain'] = df['features'].apply(lambda x: x[9])\r\n    df['Gender_Male'] = df['features'].apply(lambda x: x[10])\r\n\r\n    df.drop(columns=['features'], inplace=True)\r\n\r\n    return df\r\n"
       }
     }, {
+      "id": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
+      "operation": {
+        "id": "d273c42f-b840-4402-ba6b-18282cc68de3",
+        "name": "Split"
+      },
+      "parameters": {
+        "split mode": {
+          "RANDOM": {
+            "split ratio": 0.5
+          }
+        }
+      }
+    }, {
       "id": "deea25dd-8aac-b750-c6ea-27aafc7effbd",
       "operation": {
         "id": "a63b6de3-793b-4cbd-ae81-76de216d90d5",
@@ -138,19 +151,6 @@
       },
       "parameters": {
         "code": "import mlflow\nimport pandas as pd\nimport numpy as np\nfrom sklearn.metrics import (\n    roc_auc_score, accuracy_score, precision_score, recall_score, \n    f1_score, log_loss, confusion_matrix\n)\n\nexperiment_name = spark.conf.get(\"spark.experiment_name\")\nworkflow_id = spark.conf.get(\"spark.workflow_id\")\nmlflow.set_experiment(experiment_name)\n\ndef calc_pct_proba(y_pred_proba, classes, y_true, y_pred):\n    df_tmp = pd.DataFrame(y_pred_proba, columns=classes)\n    pct_proba = pd.DataFrame(\n        columns=['churn_percentile', 'population_by_percentile', \n                 'predicted_to_churn', 'min_proba', 'max_proba', \n                 'f1', 'accuracy', 'precision', 'recall']\n    )\n    df_tmp['pct'] = df_tmp[1].rank(pct=True) * 100\n    df_tmp['y_true'] = y_true.values\n    df_tmp['y_pred'] = y_pred\n    for i in range(96, -1, -4):\n        tmp_df = df_tmp[df_tmp['pct'] > i]\n        population = len(tmp_df)\n        pred_churn = len(tmp_df[tmp_df['y_pred'] == 1])\n        min_proba = tmp_df[1].min()\n        max_proba = tmp_df[1].max()\n        accuracy = accuracy_score(tmp_df['y_true'], tmp_df['y_pred'])\n        precision = precision_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\n        recall = recall_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\n        f1 = f1_score(tmp_df['y_true'], tmp_df['y_pred'], zero_division=0)\n\n        pct_proba.loc[len(pct_proba)] = (\n            i, population, pred_churn, min_proba, max_proba, f1, accuracy, precision, recall\n        )\n    return pct_proba\n    \ndef get_run_id(run_id_path):\n    with open(run_id_path, \"r\") as f:\n        run_id = f.read().strip()\n    return run_id\n\ndef transform(dataframe):\n    run_id = get_run_id(f'/library/{workflow_id}')\n    \n    df = dataframe.toPandas()\n    X_test = df.drop(columns=[\"Exited\"])\n    y_test = df[\"Exited\"]\n\n    with mlflow.start_run(run_id = run_id, nested=True):\n        \n        lr = mlflow.sklearn.load_model(f\"runs:/{run_id}/model\")\n        y_pred = lr.predict(X_test)\n        y_pred_proba = lr.predict_proba(X_test)\n        \n        # Log all evaluation metrics\n        mlflow.log_metric(\"roc_auc\", np.float64(roc_auc_score(y_test, y_pred)))\n        mlflow.log_metric(\"accuracy\", np.float64(accuracy_score(y_test, y_pred)))\n        mlflow.log_metric(\"precision\", np.float64(precision_score(y_test, y_pred, zero_division=0)))\n        mlflow.log_metric(\"recall\", np.float64(recall_score(y_test, y_pred, zero_division=0)))\n        mlflow.log_metric(\"f1_score\", np.float64(f1_score(y_test, y_pred, zero_division=0)))\n        mlflow.log_metric(\"log_loss\", np.float64(log_loss(y_test, y_pred_proba)))\n        \n        # Log all evaluation artifacts\n        conf_matrix = pd.DataFrame(confusion_matrix(y_test, y_pred))\n        conf_matrix.to_csv(\"confusion_matrix_logged.csv\", index=False)\n        mlflow.log_artifact(\"confusion_matrix_logged.csv\")\n        \n        proba_df = calc_pct_proba(y_pred_proba, lr.classes_, y_test, y_pred)\n        proba_df.to_csv(\"proba_df_logged.csv\", index=False)\n        mlflow.log_artifact(\"proba_df_logged.csv\")\n        \n        example_input = X_test.head(5)\n        example_input.to_csv(\"example_input.csv\", index=False)\n        mlflow.log_artifact(\"example_input.csv\")\n        \n        feature_names = list(X_test.columns)\n        with open(\"feature_names.txt\", \"w\") as f:\n            f.write(\"\\n\".join(feature_names))\n        mlflow.log_artifact(\"feature_names.txt\")\n\n        mlflow.end_run()\n    return dataframe"
-      }
-    }, {
-      "id": "c8bca42a-354e-53e8-baf9-6df95c65bfdd",
-      "operation": {
-        "id": "d273c42f-b840-4402-ba6b-18282cc68de3",
-        "name": "Split"
-      },
-      "parameters": {
-        "split mode": {
-          "RANDOM": {
-            "split ratio": 0.2
-          }
-        }
       }
     }, {
       "id": "193f247e-dd3e-c407-79c2-f56440133ea3",
@@ -358,7 +358,7 @@
           "color": "#00B1EB",
           "coordinates": {
             "x": 8744,
-            "y": 9458
+            "y": 9452
           }
         },
         "a4042991-fcff-33d6-311d-ad784f60bf96": {
